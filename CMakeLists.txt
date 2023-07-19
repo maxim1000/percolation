@@ -7,5 +7,5 @@ target_link_libraries(percolation ${VTK_LIBRARIES})
 vtk_module_autoinit(
 	TARGETS percolation
 	MODULES ${VTK_LIBRARIES})
-find_package(Qt5 COMPONENTS Core REQUIRED)
-target_link_libraries(percolation Qt5::Core)
+find_package(Qt5 COMPONENTS Core Gui Widgets OpenGL REQUIRED)
+target_link_libraries(percolation Qt5::Widgets)

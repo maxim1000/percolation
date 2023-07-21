@@ -139,7 +139,7 @@ TMainWindow::TMainWindow()
 		vtkNew<vtkCamera> camera;
 		camera->SetViewUp(0,1,0);
 		camera->SetFocalPoint(0,0,0);
-		camera->SetPosition(-100,100,-100);
+		camera->SetPosition(-300,100,-50);
 		Renderer->SetActiveCamera(camera);
 	}
 	{//add to the renderer

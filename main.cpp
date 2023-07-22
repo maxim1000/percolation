@@ -5,6 +5,7 @@
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QOpenGLWidget>
+#include <QPushButton>
 #include <QVBoxLayout>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkCamera.h>
@@ -137,6 +138,7 @@ private:
 	vtkNew<vtkRenderer> Renderer;
 	vtkSmartPointer<vtkActor> Actor;
 	void UpdateModel();
+	void ChangeSeed(int change);
 };
 TMainWindow::TMainWindow()
 	:Window(nullptr)
@@ -161,15 +163,23 @@ TMainWindow::TMainWindow()
 		label->setText("seed");
 		SeedEditor=new QLineEdit(PanelWidget);
 		SeedEditor->setText("4");
+		connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
 		auto *layout=new QVBoxLayout();
 		auto *seedLayout=new QHBoxLayout();
 		seedLayout->addWidget(label);
 		seedLayout->addWidget(SeedEditor,1);
 		layout->addLayout(seedLayout);
+		auto *buttonsLayout=new QHBoxLayout();
+		auto *previousSeedButton=new QPushButton("previous",PanelWidget);
+		connect(previousSeedButton,&QPushButton::clicked,[this](){ChangeSeed(-1);});
+		buttonsLayout->addWidget(previousSeedButton);
+		auto *nextSeedButton=new QPushButton("next",PanelWidget);
+		connect(nextSeedButton,&QPushButton::clicked,[this](){ChangeSeed(1);});
+		buttonsLayout->addWidget(nextSeedButton);
+		layout->addLayout(buttonsLayout);
 		layout->addStretch(1);
 		PanelWidget->setLayout(layout);
 	}
-	connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
 	DockWidget->setWidget(PanelWidget);
 	UpdateModel();
 	Window.show();
@@ -185,6 +195,28 @@ void TMainWindow::UpdateModel()
 	Actor->SetMapper(mapper);
 	Renderer->AddActor(Actor);
 	Renderer->GetRenderWindow()->Render();
+}
+void TMainWindow::ChangeSeed(int change)
+{
+	std::uint32_t seed=SeedEditor->text().toInt();
+	if(change>0)
+	{
+		const auto max=std::numeric_limits<std::uint32_t>::max();
+		if(seed>=max-change)
+			seed=max;
+		else
+			seed=seed+change;
+	}
+	else
+	{
+		const auto min=0;
+		if(seed<=min-change)
+			seed=min;
+		else
+			seed=seed+change;
+	}
+	SeedEditor->setText(std::to_string(seed).c_str());
+	UpdateModel();
 }
 int main(int argc,char *argv[])
 {

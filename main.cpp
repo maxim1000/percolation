@@ -133,9 +133,6 @@ public:
 	TMainWindow();
 private:
 	QMainWindow Window;
-	QVTKOpenGLNativeWidget *Scene;
-	QDockWidget *DockWidget;
-	QWidget *PanelWidget;
 	QLineEdit *SeedEditor;
 	vtkNew<vtkRenderer> Renderer;
 	vtkSmartPointer<vtkActor> Actor;
@@ -148,23 +145,23 @@ TMainWindow::TMainWindow()
 {
 	Window.setWindowTitle("Percolation");
 	Window.resize(800,600);
-	Scene=new QVTKOpenGLNativeWidget(&Window);
-	Window.setCentralWidget(Scene);
-	{//set the camera
+	{//set up the 3D scene
+		auto *scene=new QVTKOpenGLNativeWidget(&Window);
+		Window.setCentralWidget(scene);
 		vtkNew<vtkCamera> camera;
 		camera->SetViewUp(0,1,0);
 		camera->SetFocalPoint(0,0,0);
 		camera->SetPosition(-300,100,-50);
 		Renderer->SetActiveCamera(camera);
+		scene->renderWindow()->AddRenderer(Renderer);
 	}
-	Scene->renderWindow()->AddRenderer(Renderer);
-	DockWidget=new QDockWidget(&Window);
-	Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,DockWidget);
-	PanelWidget=new QWidget(DockWidget);
 	{//fill the panel
-		auto *label=new QLabel(PanelWidget);
+		auto *dockWidget=new QDockWidget(&Window);
+		Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,dockWidget);
+		auto *panelWidget=new QWidget(dockWidget);
+		auto *label=new QLabel(panelWidget);
 		label->setText("seed");
-		SeedEditor=new QLineEdit(PanelWidget);
+		SeedEditor=new QLineEdit(panelWidget);
 		SeedEditor->setText("4");
 		SeedEditor->setValidator(
 			new QIntValidator(0,std::numeric_limits<std::int32_t>::max()));//doesn't work with uint32 (apparently something signed 32-bit is inside)
@@ -175,17 +172,17 @@ TMainWindow::TMainWindow()
 		seedLayout->addWidget(SeedEditor,1);
 		layout->addLayout(seedLayout);
 		auto *buttonsLayout=new QHBoxLayout();
-		auto *previousSeedButton=new QPushButton("previous",PanelWidget);
+		auto *previousSeedButton=new QPushButton("previous",panelWidget);
 		connect(previousSeedButton,&QPushButton::clicked,[this](){ChangeSeed(-1);});
 		buttonsLayout->addWidget(previousSeedButton);
-		auto *nextSeedButton=new QPushButton("next",PanelWidget);
+		auto *nextSeedButton=new QPushButton("next",panelWidget);
 		connect(nextSeedButton,&QPushButton::clicked,[this](){ChangeSeed(1);});
 		buttonsLayout->addWidget(nextSeedButton);
 		layout->addLayout(buttonsLayout);
 		layout->addStretch(1);
-		PanelWidget->setLayout(layout);
+		panelWidget->setLayout(layout);
+		dockWidget->setWidget(panelWidget);
 	}
-	DockWidget->setWidget(PanelWidget);
 	UpdateModel();
 	Window.show();
 }

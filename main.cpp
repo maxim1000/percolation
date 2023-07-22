@@ -14,7 +14,7 @@
 #include <queue>
 #include <random>
 #include <set>
-vtkSmartPointer<vtkPolyData> MakePercolationModel()
+vtkSmartPointer<vtkPolyData> MakePercolationModel(const std::uint32_t seed)
 {
 	using TVoxel=std::array<int,3>;
 	std::set<TVoxel> filledVoxels;
@@ -22,7 +22,6 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel()
 		using TEdge=std::array<TVoxel,2>;
 		const double threshold=0.25;
 		const int maxCoordinate=50;
-		const std::uint32_t seed=4;
 		std::mt19937 randomSource(seed);
 		std::bernoulli_distribution edgeIsEnabled(threshold);
 		std::map<TEdge,bool> cached;
@@ -132,6 +131,8 @@ private:
 	QDockWidget *DockWidget;
 	QLineEdit *SeedEditor;
 	vtkNew<vtkRenderer> Renderer;
+	vtkSmartPointer<vtkActor> Actor;
+	void UpdateModel();
 };
 TMainWindow::TMainWindow()
 	:Window(nullptr)
@@ -147,19 +148,24 @@ TMainWindow::TMainWindow()
 		camera->SetPosition(-300,100,-50);
 		Renderer->SetActiveCamera(camera);
 	}
-	{//add to the renderer
-		vtkNew<vtkPolyDataMapper> mapper;
-		mapper->SetInputData(MakePercolationModel());
-		vtkNew<vtkActor> actor;
-		actor->SetMapper(mapper);
-		Renderer->AddActor(actor);
-	}
+	UpdateModel();
 	Scene->renderWindow()->AddRenderer(Renderer);
 	DockWidget=new QDockWidget(&Window);
 	Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,DockWidget);
 	SeedEditor=new QLineEdit(DockWidget);
 	DockWidget->setWidget(SeedEditor);
 	Window.show();
+}
+void TMainWindow::UpdateModel()
+{
+	const std::uint32_t seed=4;
+	if(Actor!=nullptr)
+		Renderer->RemoveActor(Actor);
+	Actor=vtkNew<vtkActor>();
+	vtkNew<vtkPolyDataMapper> mapper;
+	mapper->SetInputData(MakePercolationModel(seed));
+	Actor->SetMapper(mapper);
+	Renderer->AddActor(Actor);
 }
 int main(int argc,char *argv[])
 {

@@ -1,4 +1,6 @@
 #include <QApplication>
+#include <QDockWidget>
+#include <QLineEdit>
 #include <QMainWindow>
 #include <QOpenGLWidget>
 #include <QVTKOpenGLNativeWidget.h>
@@ -127,6 +129,8 @@ public:
 private:
 	QMainWindow Window;
 	QVTKOpenGLNativeWidget *Scene;
+	QDockWidget *DockWidget;
+	QLineEdit *SeedEditor;
 	vtkNew<vtkRenderer> Renderer;
 };
 TMainWindow::TMainWindow()
@@ -151,6 +155,10 @@ TMainWindow::TMainWindow()
 		Renderer->AddActor(actor);
 	}
 	Scene->renderWindow()->AddRenderer(Renderer);
+	DockWidget=new QDockWidget(&Window);
+	Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,DockWidget);
+	SeedEditor=new QLineEdit(DockWidget);
+	DockWidget->setWidget(SeedEditor);
 	Window.show();
 }
 int main(int argc,char *argv[])

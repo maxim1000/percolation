@@ -148,17 +148,19 @@ TMainWindow::TMainWindow()
 		camera->SetPosition(-300,100,-50);
 		Renderer->SetActiveCamera(camera);
 	}
-	UpdateModel();
 	Scene->renderWindow()->AddRenderer(Renderer);
 	DockWidget=new QDockWidget(&Window);
 	Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,DockWidget);
 	SeedEditor=new QLineEdit(DockWidget);
+	SeedEditor->setText("4");
+	connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
 	DockWidget->setWidget(SeedEditor);
+	UpdateModel();
 	Window.show();
 }
 void TMainWindow::UpdateModel()
 {
-	const std::uint32_t seed=4;
+	const std::uint32_t seed=SeedEditor->text().toInt();
 	if(Actor!=nullptr)
 		Renderer->RemoveActor(Actor);
 	Actor=vtkNew<vtkActor>();
@@ -166,6 +168,7 @@ void TMainWindow::UpdateModel()
 	mapper->SetInputData(MakePercolationModel(seed));
 	Actor->SetMapper(mapper);
 	Renderer->AddActor(Actor);
+	Renderer->GetRenderWindow()->Render();
 }
 int main(int argc,char *argv[])
 {

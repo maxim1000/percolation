@@ -159,26 +159,30 @@ TMainWindow::TMainWindow()
 		auto *dockWidget=new QDockWidget(&Window);
 		Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,dockWidget);
 		auto *panelWidget=new QWidget(dockWidget);
-		auto *label=new QLabel(panelWidget);
-		label->setText("seed");
-		SeedEditor=new QLineEdit(panelWidget);
-		SeedEditor->setText("4");
-		SeedEditor->setValidator(
-			new QIntValidator(0,std::numeric_limits<std::int32_t>::max()));//doesn't work with uint32 (apparently something signed 32-bit is inside)
-		connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
 		auto *layout=new QVBoxLayout();
-		auto *seedLayout=new QHBoxLayout();
-		seedLayout->addWidget(label);
-		seedLayout->addWidget(SeedEditor,1);
-		layout->addLayout(seedLayout);
-		auto *buttonsLayout=new QHBoxLayout();
-		auto *previousSeedButton=new QPushButton("previous",panelWidget);
-		connect(previousSeedButton,&QPushButton::clicked,[this](){ChangeSeed(-1);});
-		buttonsLayout->addWidget(previousSeedButton);
-		auto *nextSeedButton=new QPushButton("next",panelWidget);
-		connect(nextSeedButton,&QPushButton::clicked,[this](){ChangeSeed(1);});
-		buttonsLayout->addWidget(nextSeedButton);
-		layout->addLayout(buttonsLayout);
+		{//add seed editor with label
+			auto *label=new QLabel(panelWidget);
+			label->setText("seed");
+			SeedEditor=new QLineEdit(panelWidget);
+			SeedEditor->setText("4");
+			SeedEditor->setValidator(
+				new QIntValidator(0,std::numeric_limits<std::int32_t>::max()));//doesn't work with uint32 (apparently something signed 32-bit is inside)
+			connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
+			auto *seedLayout=new QHBoxLayout();
+			seedLayout->addWidget(label);
+			seedLayout->addWidget(SeedEditor,1);
+			layout->addLayout(seedLayout);
+		}
+		{//add buttons
+			auto *buttonsLayout=new QHBoxLayout();
+			auto *previousSeedButton=new QPushButton("previous",panelWidget);
+			connect(previousSeedButton,&QPushButton::clicked,[this](){ChangeSeed(-1);});
+			buttonsLayout->addWidget(previousSeedButton);
+			auto *nextSeedButton=new QPushButton("next",panelWidget);
+			connect(nextSeedButton,&QPushButton::clicked,[this](){ChangeSeed(1);});
+			buttonsLayout->addWidget(nextSeedButton);
+			layout->addLayout(buttonsLayout);
+		}
 		layout->addStretch(1);
 		panelWidget->setLayout(layout);
 		dockWidget->setWidget(panelWidget);

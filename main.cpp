@@ -125,16 +125,17 @@ class TMainWindow:public QMainWindow
 public:
 	TMainWindow();
 private:
+	QMainWindow Window;
 	QVTKOpenGLNativeWidget *Scene;
 	vtkNew<vtkRenderer> Renderer;
 };
 TMainWindow::TMainWindow()
-	:QMainWindow(nullptr)
+	:Window(nullptr)
 {
-	setWindowTitle("Percolation");
-	resize(800,600);
-	Scene=new QVTKOpenGLNativeWidget(this);
-	setCentralWidget(Scene);
+	Window.setWindowTitle("Percolation");
+	Window.resize(800,600);
+	Scene=new QVTKOpenGLNativeWidget(&Window);
+	Window.setCentralWidget(Scene);
 	{//set the camera
 		vtkNew<vtkCamera> camera;
 		camera->SetViewUp(0,1,0);
@@ -150,11 +151,11 @@ TMainWindow::TMainWindow()
 		Renderer->AddActor(actor);
 	}
 	Scene->renderWindow()->AddRenderer(Renderer);
+	Window.show();
 }
 int main(int argc,char *argv[])
 {
 	QApplication app(argc,argv);
 	TMainWindow window;
-	window.show();
 	return app.exec();
 }

@@ -6,6 +6,7 @@
 #include <QMainWindow>
 #include <QOpenGLWidget>
 #include <QPushButton>
+#include <QValidator>
 #include <QVBoxLayout>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkCamera.h>
@@ -18,6 +19,7 @@
 #include <queue>
 #include <random>
 #include <set>
+#include <sstream>
 vtkSmartPointer<vtkPolyData> MakePercolationModel(const std::uint32_t seed)
 {
 	using TVoxel=std::array<int,3>;
@@ -139,6 +141,7 @@ private:
 	vtkSmartPointer<vtkActor> Actor;
 	void UpdateModel();
 	void ChangeSeed(int change);
+	std::uint32_t GetCurrentSeed() const;
 };
 TMainWindow::TMainWindow()
 	:Window(nullptr)
@@ -163,6 +166,8 @@ TMainWindow::TMainWindow()
 		label->setText("seed");
 		SeedEditor=new QLineEdit(PanelWidget);
 		SeedEditor->setText("4");
+		SeedEditor->setValidator(
+			new QIntValidator(0,std::numeric_limits<std::int32_t>::max()));//doesn't work with uint32 (apparently something signed 32-bit is inside)
 		connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
 		auto *layout=new QVBoxLayout();
 		auto *seedLayout=new QHBoxLayout();
@@ -186,19 +191,18 @@ TMainWindow::TMainWindow()
 }
 void TMainWindow::UpdateModel()
 {
-	const std::uint32_t seed=SeedEditor->text().toInt();
 	if(Actor!=nullptr)
 		Renderer->RemoveActor(Actor);
 	Actor=vtkNew<vtkActor>();
 	vtkNew<vtkPolyDataMapper> mapper;
-	mapper->SetInputData(MakePercolationModel(seed));
+	mapper->SetInputData(MakePercolationModel(GetCurrentSeed()));
 	Actor->SetMapper(mapper);
 	Renderer->AddActor(Actor);
 	Renderer->GetRenderWindow()->Render();
 }
 void TMainWindow::ChangeSeed(int change)
 {
-	std::uint32_t seed=SeedEditor->text().toInt();
+	auto seed=GetCurrentSeed();
 	if(change>0)
 	{
 		const auto max=std::numeric_limits<std::uint32_t>::max();
@@ -217,6 +221,15 @@ void TMainWindow::ChangeSeed(int change)
 	}
 	SeedEditor->setText(std::to_string(seed).c_str());
 	UpdateModel();
+}
+std::uint32_t TMainWindow::GetCurrentSeed() const
+{
+	const auto text=SeedEditor->text().toStdString();
+	if(text.empty())
+		return 0;
+	std::uint32_t result;
+	std::istringstream(text)>>result;
+	return result;
 }
 int main(int argc,char *argv[])
 {

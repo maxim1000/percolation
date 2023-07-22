@@ -1,8 +1,11 @@
 #include <QApplication>
 #include <QDockWidget>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QOpenGLWidget>
+#include <QVBoxLayout>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkCamera.h>
 #include <vtkPolyData.h>
@@ -129,6 +132,7 @@ private:
 	QMainWindow Window;
 	QVTKOpenGLNativeWidget *Scene;
 	QDockWidget *DockWidget;
+	QWidget *PanelWidget;
 	QLineEdit *SeedEditor;
 	vtkNew<vtkRenderer> Renderer;
 	vtkSmartPointer<vtkActor> Actor;
@@ -151,10 +155,22 @@ TMainWindow::TMainWindow()
 	Scene->renderWindow()->AddRenderer(Renderer);
 	DockWidget=new QDockWidget(&Window);
 	Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,DockWidget);
-	SeedEditor=new QLineEdit(DockWidget);
-	SeedEditor->setText("4");
+	PanelWidget=new QWidget(DockWidget);
+	{//fill the panel
+		auto *label=new QLabel(PanelWidget);
+		label->setText("seed");
+		SeedEditor=new QLineEdit(PanelWidget);
+		SeedEditor->setText("4");
+		auto *layout=new QVBoxLayout();
+		auto *seedLayout=new QHBoxLayout();
+		seedLayout->addWidget(label);
+		seedLayout->addWidget(SeedEditor,1);
+		layout->addLayout(seedLayout);
+		layout->addStretch(1);
+		PanelWidget->setLayout(layout);
+	}
 	connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
-	DockWidget->setWidget(SeedEditor);
+	DockWidget->setWidget(PanelWidget);
 	UpdateModel();
 	Window.show();
 }

@@ -10,17 +10,23 @@
 #include <QVBoxLayout>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkCamera.h>
+#include <vtkImageData.h>
+#include <vtkMarchingCubes.h>
+#include <vtkPointLocator.h>
 #include <vtkPolyData.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkRenderer.h>
 #include <vtkRenderWindow.h>
 #include <array>
+#include <cmath>
 #include <map>
 #include <queue>
 #include <random>
 #include <set>
 #include <sstream>
-vtkSmartPointer<vtkPolyData> MakePercolationModel(const std::uint32_t seed)
+vtkSmartPointer<vtkPolyData> MakePercolationModel(
+	const std::uint32_t seed,
+	bool makeCloud)
 {
 	using TVoxel=std::array<int,3>;
 	std::set<TVoxel> filledVoxels;
@@ -62,9 +68,83 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel(const std::uint32_t seed)
 			}
 		}
 	}
-	vtkNew<vtkPolyData> mesh;
+	if(makeCloud)
+	{
+		const double radius=10;
+		const auto maxCoordinate=[&]()
+		{
+			int result=0;
+			for(const auto &voxel:filledVoxels)
+				for(int coordinate:voxel)
+					result=std::max(result,std::abs(coordinate));
+			return result;
+		}();
+		const auto locator=[&]()
+		{
+			vtkNew<vtkPoints> points;
+			for(const auto &voxel:filledVoxels)
+			{
+				double coordinates[3];
+				for(int c=0;c<3;++c)
+					coordinates[c]=double(voxel[c]);
+				points->InsertNextPoint(coordinates);
+			}
+			vtkNew<vtkPolyData> polyData;
+			polyData->SetPoints(points);
+			vtkNew<vtkPointLocator> result;
+			result->SetDataSet(polyData);
+			result->BuildLocator();
+			return result;
+		}();
+		const auto image=[&]()
+		{
+			const int dimension=maxCoordinate+int(radius+1);
+			vtkNew<vtkImageData> image;
+			image->SetExtent(-dimension,dimension,-dimension,dimension,-dimension,dimension);
+			image->AllocateScalars(VTK_DOUBLE,1);
+			for(int z=-dimension;z<=dimension;++z)
+			{
+				for(int y=-dimension;y<=dimension;++y)
+				{
+					for(int x=-dimension;x<=dimension;++x)
+					{
+						double closest[3];
+						locator->GetDataSet()->GetPoint(
+							locator->FindClosestPoint(x,y,z),
+							closest);
+						const double difference[3]=
+						{
+							closest[0]-x,
+							closest[1]-y,
+							closest[2]-z
+						};
+						double squaredDistance=0;
+						for(int c=0;c<3;++c)
+							squaredDistance+=difference[c]*difference[c];
+						image->SetScalarComponentFromDouble(x,y,z,0,std::sqrt(squaredDistance));
+					}
+				}
+			}
+			return image;
+		}();
+		const auto isosurface=[&]()
+		{
+			vtkNew<vtkMarchingCubes> builder;
+			builder->SetInputData(image);
+			builder->SetNumberOfContours(1);
+			builder->SetValue(0,radius);
+			builder->SetComputeGradients(false);
+			builder->SetComputeNormals(false);
+			builder->SetComputeScalars(false);
+			builder->Update();
+			return vtkSmartPointer<vtkPolyData>(builder->GetOutput());
+		}();
+		return isosurface;
+	}
+	else
 	{//fill the mesh wiith the voxels
 		using TVertex=std::array<int,3>;//min-min-min corner of a voxel
+		vtkNew<vtkPolyData> mesh;
 		mesh->SetPoints(vtkNew<vtkPoints>());
 		mesh->SetPolys(vtkNew<vtkCellArray>());
 		std::map<TVertex,vtkIdType> addedVertices;
@@ -123,8 +203,8 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel(const std::uint32_t seed)
 				}
 			}
 		}
+		return mesh;
 	}
-	return mesh;
 }
 ///////////////////////////////////////////////////////////////////////////////
 class TMainWindow:public QMainWindow
@@ -196,7 +276,7 @@ void TMainWindow::UpdateModel()
 		Renderer->RemoveActor(Actor);
 	Actor=vtkNew<vtkActor>();
 	vtkNew<vtkPolyDataMapper> mapper;
-	mapper->SetInputData(MakePercolationModel(GetCurrentSeed()));
+	mapper->SetInputData(MakePercolationModel(GetCurrentSeed(),true));
 	Actor->SetMapper(mapper);
 	Renderer->AddActor(Actor);
 	Renderer->GetRenderWindow()->Render();

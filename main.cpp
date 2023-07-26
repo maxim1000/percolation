@@ -108,19 +108,13 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel(
 				{
 					for(int x=-dimension;x<=dimension;++x)
 					{
-						double closest[3];
-						locator->GetDataSet()->GetPoint(
-							locator->FindClosestPoint(x,y,z),
-							closest);
-						const double difference[3]=
-						{
-							closest[0]-x,
-							closest[1]-y,
-							closest[2]-z
-						};
-						double squaredDistance=0;
-						for(int c=0;c<3;++c)
-							squaredDistance+=difference[c]*difference[c];
+						const double point[]={double(x),double(y),double(z)};
+						double squaredDistance=std::numeric_limits<double>::max();
+						const double limit=radius+1;
+						const auto closestPointId=
+							locator->FindClosestPointWithinRadius(limit,point,squaredDistance);
+						if(closestPointId==-1)
+							squaredDistance=limit*limit;
 						image->SetScalarComponentFromDouble(x,y,z,0,std::sqrt(squaredDistance));
 					}
 				}

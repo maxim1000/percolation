@@ -24,6 +24,49 @@
 #include <random>
 #include <set>
 #include <sstream>
+class TFasterImageAccessor
+{
+public:
+	TFasterImageAccessor(const vtkSmartPointer<vtkImageData>&);
+	double Get(int x,int y,int z) const;
+	void Set(int x,int y,int z,double value);
+private:
+	vtkSmartPointer<vtkImageData> Image;
+	double *Pointer;
+	vtkIdType Increments[3];
+	int Start[3];
+	double *GetPointer(int x,int y,int z) const;
+};
+TFasterImageAccessor::TFasterImageAccessor(
+	const vtkSmartPointer<vtkImageData> &image)
+	:Image(image)
+{
+	if(Image->GetScalarType()!=VTK_DOUBLE)
+		throw std::logic_error("TFasterImageAccessor: only double scalars are supported");
+	if(Image->GetNumberOfScalarComponents()!=1)
+		throw std::logic_error("TFasterImageAccessor: only single-component scalars are supported");
+	Pointer=reinterpret_cast<double*>(Image->GetScalarPointer());
+	Image->GetIncrements(Increments);
+	for(int c=0;c<3;++c)
+		Start[c]=Image->GetExtent()[2*c];
+}
+double TFasterImageAccessor::Get(int x,int y,int z) const
+{
+	return *GetPointer(x,y,z);
+}
+void TFasterImageAccessor::Set(int x,int y,int z,double value)
+{
+	*GetPointer(x,y,z)=value;
+}
+double *TFasterImageAccessor::GetPointer(int x,int y,int z) const
+{
+	double *result=Pointer;
+	result+=(x-Start[0])*Increments[0];
+	result+=(y-Start[1])*Increments[1];
+	result+=(z-Start[2])*Increments[2];
+	return result;
+}
+///////////////////////////////////////////////////////////////////////////////
 vtkSmartPointer<vtkPolyData> MakePercolationModel(
 	const std::uint32_t seed,
 	bool makeCloud)
@@ -105,6 +148,7 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel(
 				image->GetExtent(extent);
 				smoothed->SetExtent(extent);
 				smoothed->AllocateScalars(VTK_DOUBLE,1);
+				const TFasterImageAccessor imageReader(image);
 				for(int z=extent[4];z<=extent[5];++z)
 				{
 					for(int y=extent[2];y<=extent[3];++y)
@@ -125,7 +169,7 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel(
 									{
 										if(x+dx<extent[0] || x+dx>extent[1])
 											continue;
-										sum+=image->GetScalarComponentAsDouble(x+dx,y+dy,z+dz,0);
+										sum+=imageReader.Get(x+dx,y+dy,z+dz);
 										++count;
 									}
 								}

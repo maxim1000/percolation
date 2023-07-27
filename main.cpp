@@ -96,6 +96,48 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel(
 			result->BuildLocator();
 			return result;
 		}();
+		const auto smoothImage=[](vtkSmartPointer<vtkImageData> image,int count)
+		{
+			while(count-->0)
+			{
+				vtkNew<vtkImageData> smoothed;
+				int extent[6];
+				image->GetExtent(extent);
+				smoothed->SetExtent(extent);
+				smoothed->AllocateScalars(VTK_DOUBLE,1);
+				for(int z=extent[4];z<=extent[5];++z)
+				{
+					for(int y=extent[2];y<=extent[3];++y)
+					{
+						for(int x=extent[0];x<=extent[1];++x)
+						{
+							double sum=0;
+							int count=0;
+							for(int dz=-1;dz<=1;++dz)
+							{
+								if(z+dz<extent[4] || z+dz>extent[5])
+									continue;
+								for(int dy=-1;dy<=1;++dy)
+								{
+									if(y+dy<extent[2] || y+dy>extent[3])
+										continue;
+									for(int dx=-1;dx<=1;++dx)
+									{
+										if(x+dx<extent[0] || x+dx>extent[1])
+											continue;
+										sum+=image->GetScalarComponentAsDouble(x+dx,y+dy,z+dz,0);
+										++count;
+									}
+								}
+							}
+							smoothed->SetScalarComponentFromDouble(x,y,z,0,sum/count);
+						}
+					}
+				}
+				image=smoothed;
+			}
+			return image;
+		};
 		const auto image=[&]()
 		{
 			const int dimension=maxCoordinate+int(radius+1);
@@ -119,7 +161,7 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel(
 					}
 				}
 			}
-			return image;
+			return smoothImage(image,3);
 		}();
 		const auto isosurface=[&]()
 		{

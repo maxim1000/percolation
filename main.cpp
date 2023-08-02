@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QCheckBox>
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -304,6 +305,7 @@ public:
 private:
 	QMainWindow Window;
 	QLineEdit *SeedEditor;
+	QCheckBox *CloudMode;
 	vtkNew<vtkRenderer> Renderer;
 	vtkSmartPointer<vtkActor> Actor;
 	void UpdateModel();
@@ -343,7 +345,7 @@ TMainWindow::TMainWindow()
 			seedLayout->addWidget(SeedEditor,1);
 			layout->addLayout(seedLayout);
 		}
-		{//add buttons
+		{//add seed switching buttons
 			auto *buttonsLayout=new QHBoxLayout();
 			auto *previousSeedButton=new QPushButton("previous",panelWidget);
 			connect(previousSeedButton,&QPushButton::clicked,[this](){ChangeSeed(-1);});
@@ -352,6 +354,11 @@ TMainWindow::TMainWindow()
 			connect(nextSeedButton,&QPushButton::clicked,[this](){ChangeSeed(1);});
 			buttonsLayout->addWidget(nextSeedButton);
 			layout->addLayout(buttonsLayout);
+		}
+		{//add cloud button
+			CloudMode=new QCheckBox("cloud mode",panelWidget);
+			connect(CloudMode,&QCheckBox::stateChanged,[this](){UpdateModel();});
+			layout->addWidget(CloudMode);
 		}
 		layout->addStretch(1);
 		panelWidget->setLayout(layout);
@@ -366,7 +373,9 @@ void TMainWindow::UpdateModel()
 		Renderer->RemoveActor(Actor);
 	Actor=vtkNew<vtkActor>();
 	vtkNew<vtkPolyDataMapper> mapper;
-	mapper->SetInputData(MakePercolationModel(GetCurrentSeed(),true));
+	mapper->SetInputData(MakePercolationModel(
+		GetCurrentSeed(),
+		CloudMode->isChecked()));
 	Actor->SetMapper(mapper);
 	Renderer->AddActor(Actor);
 	Renderer->GetRenderWindow()->Render();

@@ -1,6 +1,13 @@
 #include <QApplication>
+#include <QDockWidget>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMainWindow>
 #include <QOpenGLWidget>
+#include <QPushButton>
+#include <QValidator>
+#include <QVBoxLayout>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkCamera.h>
 #include <vtkPolyData.h>
@@ -12,7 +19,8 @@
 #include <queue>
 #include <random>
 #include <set>
-vtkSmartPointer<vtkPolyData> MakePercolationModel()
+#include <sstream>
+vtkSmartPointer<vtkPolyData> MakePercolationModel(const std::uint32_t seed)
 {
 	using TVoxel=std::array<int,3>;
 	std::set<TVoxel> filledVoxels;
@@ -20,7 +28,6 @@ vtkSmartPointer<vtkPolyData> MakePercolationModel()
 		using TEdge=std::array<TVoxel,2>;
 		const double threshold=0.25;
 		const int maxCoordinate=50;
-		const std::uint32_t seed=4;
 		std::mt19937 randomSource(seed);
 		std::bernoulli_distribution edgeIsEnabled(threshold);
 		std::map<TEdge,bool> cached;
@@ -125,36 +132,109 @@ class TMainWindow:public QMainWindow
 public:
 	TMainWindow();
 private:
-	QVTKOpenGLNativeWidget *Scene;
+	QMainWindow Window;
+	QLineEdit *SeedEditor;
 	vtkNew<vtkRenderer> Renderer;
+	vtkSmartPointer<vtkActor> Actor;
+	void UpdateModel();
+	void ChangeSeed(int change);
+	std::uint32_t GetCurrentSeed() const;
 };
 TMainWindow::TMainWindow()
-	:QMainWindow(nullptr)
+	:Window(nullptr)
 {
-	setWindowTitle("Percolation");
-	resize(800,600);
-	Scene=new QVTKOpenGLNativeWidget(this);
-	setCentralWidget(Scene);
-	{//set the camera
+	Window.setWindowTitle("Percolation");
+	Window.resize(800,600);
+	{//set up the 3D scene
+		auto *scene=new QVTKOpenGLNativeWidget(&Window);
+		Window.setCentralWidget(scene);
 		vtkNew<vtkCamera> camera;
 		camera->SetViewUp(0,1,0);
 		camera->SetFocalPoint(0,0,0);
 		camera->SetPosition(-300,100,-50);
 		Renderer->SetActiveCamera(camera);
+		scene->renderWindow()->AddRenderer(Renderer);
 	}
-	{//add to the renderer
-		vtkNew<vtkPolyDataMapper> mapper;
-		mapper->SetInputData(MakePercolationModel());
-		vtkNew<vtkActor> actor;
-		actor->SetMapper(mapper);
-		Renderer->AddActor(actor);
+	{//fill the panel
+		auto *dockWidget=new QDockWidget(&Window);
+		Window.addDockWidget(Qt::DockWidgetArea::LeftDockWidgetArea,dockWidget);
+		auto *panelWidget=new QWidget(dockWidget);
+		auto *layout=new QVBoxLayout();
+		{//add seed editor with label
+			auto *label=new QLabel(panelWidget);
+			label->setText("seed");
+			SeedEditor=new QLineEdit(panelWidget);
+			SeedEditor->setText("4");
+			SeedEditor->setValidator(
+				new QIntValidator(0,std::numeric_limits<std::int32_t>::max()));//doesn't work with uint32 (apparently something signed 32-bit is inside)
+			connect(SeedEditor,&QLineEdit::editingFinished,[this](){UpdateModel();});
+			auto *seedLayout=new QHBoxLayout();
+			seedLayout->addWidget(label);
+			seedLayout->addWidget(SeedEditor,1);
+			layout->addLayout(seedLayout);
+		}
+		{//add buttons
+			auto *buttonsLayout=new QHBoxLayout();
+			auto *previousSeedButton=new QPushButton("previous",panelWidget);
+			connect(previousSeedButton,&QPushButton::clicked,[this](){ChangeSeed(-1);});
+			buttonsLayout->addWidget(previousSeedButton);
+			auto *nextSeedButton=new QPushButton("next",panelWidget);
+			connect(nextSeedButton,&QPushButton::clicked,[this](){ChangeSeed(1);});
+			buttonsLayout->addWidget(nextSeedButton);
+			layout->addLayout(buttonsLayout);
+		}
+		layout->addStretch(1);
+		panelWidget->setLayout(layout);
+		dockWidget->setWidget(panelWidget);
 	}
-	Scene->renderWindow()->AddRenderer(Renderer);
+	UpdateModel();
+	Window.show();
+}
+void TMainWindow::UpdateModel()
+{
+	if(Actor!=nullptr)
+		Renderer->RemoveActor(Actor);
+	Actor=vtkNew<vtkActor>();
+	vtkNew<vtkPolyDataMapper> mapper;
+	mapper->SetInputData(MakePercolationModel(GetCurrentSeed()));
+	Actor->SetMapper(mapper);
+	Renderer->AddActor(Actor);
+	Renderer->GetRenderWindow()->Render();
+}
+void TMainWindow::ChangeSeed(int change)
+{
+	auto seed=GetCurrentSeed();
+	if(change>0)
+	{
+		const auto max=std::numeric_limits<std::uint32_t>::max();
+		if(seed>=max-change)
+			seed=max;
+		else
+			seed=seed+change;
+	}
+	else
+	{
+		const auto min=0;
+		if(seed<=min-change)
+			seed=min;
+		else
+			seed=seed+change;
+	}
+	SeedEditor->setText(std::to_string(seed).c_str());
+	UpdateModel();
+}
+std::uint32_t TMainWindow::GetCurrentSeed() const
+{
+	const auto text=SeedEditor->text().toStdString();
+	if(text.empty())
+		return 0;
+	std::uint32_t result;
+	std::istringstream(text)>>result;
+	return result;
 }
 int main(int argc,char *argv[])
 {
 	QApplication app(argc,argv);
 	TMainWindow window;
-	window.show();
 	return app.exec();
 }

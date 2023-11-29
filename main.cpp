@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QCheckBox>
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -10,121 +11,291 @@
 #include <QVBoxLayout>
 #include <QVTKOpenGLNativeWidget.h>
 #include <vtkCamera.h>
+#include <vtkImageData.h>
+#include <vtkMarchingCubes.h>
+#include <vtkPointLocator.h>
 #include <vtkPolyData.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkRenderer.h>
 #include <vtkRenderWindow.h>
 #include <array>
+#include <cmath>
 #include <map>
 #include <queue>
 #include <random>
 #include <set>
 #include <sstream>
-vtkSmartPointer<vtkPolyData> MakePercolationModel(const std::uint32_t seed)
+class TFasterImageAccessor
 {
-	using TVoxel=std::array<int,3>;
+public:
+	TFasterImageAccessor(const vtkSmartPointer<vtkImageData>&);
+	double Get(int x,int y,int z) const;
+	void Set(int x,int y,int z,double value);
+private:
+	vtkSmartPointer<vtkImageData> Image;
+	double *Pointer;
+	vtkIdType Increments[3];
+	int Start[3];
+	double *GetPointer(int x,int y,int z) const;
+};
+TFasterImageAccessor::TFasterImageAccessor(
+	const vtkSmartPointer<vtkImageData> &image)
+	:Image(image)
+{
+	if(Image->GetScalarType()!=VTK_DOUBLE)
+		throw std::logic_error("TFasterImageAccessor: only double scalars are supported");
+	if(Image->GetNumberOfScalarComponents()!=1)
+		throw std::logic_error("TFasterImageAccessor: only single-component scalars are supported");
+	Pointer=reinterpret_cast<double*>(Image->GetScalarPointer());
+	Image->GetIncrements(Increments);
+	for(int c=0;c<3;++c)
+		Start[c]=Image->GetExtent()[2*c];
+}
+double TFasterImageAccessor::Get(int x,int y,int z) const
+{
+	return *GetPointer(x,y,z);
+}
+void TFasterImageAccessor::Set(int x,int y,int z,double value)
+{
+	*GetPointer(x,y,z)=value;
+}
+double *TFasterImageAccessor::GetPointer(int x,int y,int z) const
+{
+	double *result=Pointer;
+	result+=(x-Start[0])*Increments[0];
+	result+=(y-Start[1])*Increments[1];
+	result+=(z-Start[2])*Increments[2];
+	return result;
+}
+///////////////////////////////////////////////////////////////////////////////
+using TVoxel=std::array<int,3>;
+std::set<TVoxel> FillPercolationVoxels(std::uint32_t seed)
+{
+	using TEdge=std::array<TVoxel,2>;
+	const double threshold=0.25;
+	const int maxCoordinate=50;
+	std::mt19937 randomSource(seed);
+	std::bernoulli_distribution edgeIsEnabled(threshold);
+	std::map<TEdge,bool> cached;
+	std::queue<TVoxel> todo;
 	std::set<TVoxel> filledVoxels;
-	{//fill percolation voxels
-		using TEdge=std::array<TVoxel,2>;
-		const double threshold=0.25;
-		const int maxCoordinate=50;
-		std::mt19937 randomSource(seed);
-		std::bernoulli_distribution edgeIsEnabled(threshold);
-		std::map<TEdge,bool> cached;
-		std::queue<TVoxel> todo;
-		todo.push(TVoxel{0,0,0});
-		filledVoxels.insert(TVoxel{0,0,0});
-		while(!todo.empty())
+	todo.push(TVoxel{0,0,0});
+	filledVoxels.insert(TVoxel{0,0,0});
+	while(!todo.empty())
+	{
+		const auto current=todo.front();
+		todo.pop();
+		for(int axis=0;axis<3;++axis)
 		{
-			const auto current=todo.front();
-			todo.pop();
-			for(int axis=0;axis<3;++axis)
+			for(int direction:{-1,1})
 			{
-				for(int direction:{-1,1})
+				auto neighbour=current;
+				neighbour[axis]+=direction;
+				if(std::abs(neighbour[axis])>maxCoordinate)
+					continue;
+				if(filledVoxels.count(neighbour)!=0)
+					continue;
+				auto edge=TEdge{current,neighbour};
+				if(edge[0]>edge[1])
+					std::swap(edge[0],edge[1]);
+				if(cached.count(edge)==0)
+					cached[edge]=edgeIsEnabled(randomSource);
+				if(cached.at(edge))
 				{
-					auto neighbour=current;
-					neighbour[axis]+=direction;
-					if(std::abs(neighbour[axis])>maxCoordinate)
-						continue;
-					if(filledVoxels.count(neighbour)!=0)
-						continue;
-					auto edge=TEdge{current,neighbour};
-					if(edge[0]>edge[1])
-						std::swap(edge[0],edge[1]);
-					if(cached.count(edge)==0)
-						cached[edge]=edgeIsEnabled(randomSource);
-					if(cached.at(edge))
-					{
-						filledVoxels.insert(neighbour);
-						todo.push(neighbour);
-					}
+					filledVoxels.insert(neighbour);
+					todo.push(neighbour);
 				}
 			}
 		}
 	}
+	return filledVoxels;
+}
+vtkSmartPointer<vtkPolyData> MakeVoxelizedView(const std::set<TVoxel> &voxels)
+{
+	using TVertex=std::array<int,3>;//min-min-min corner of a voxel
 	vtkNew<vtkPolyData> mesh;
-	{//fill the mesh wiith the voxels
-		using TVertex=std::array<int,3>;//min-min-min corner of a voxel
-		mesh->SetPoints(vtkNew<vtkPoints>());
-		mesh->SetPolys(vtkNew<vtkCellArray>());
-		std::map<TVertex,vtkIdType> addedVertices;
-		const auto addFace=[&](const std::array<TVertex,4> &vertices)
+	mesh->SetPoints(vtkNew<vtkPoints>());
+	mesh->SetPolys(vtkNew<vtkCellArray>());
+	std::map<TVertex,vtkIdType> addedVertices;
+	const auto addFace=[&](const std::array<TVertex,4> &vertices)
+	{
+		vtkIdType vtkVertices[4];
+		for(int v=0;v<4;++v)
 		{
-			vtkIdType vtkVertices[4];
-			for(int v=0;v<4;++v)
+			const auto vertex=vertices[v];
+			if(addedVertices.count(vertex)==0)
 			{
-				const auto vertex=vertices[v];
-				if(addedVertices.count(vertex)==0)
-				{
-					addedVertices[vertex]=mesh->GetPoints()->InsertNextPoint(
-						vertex[0],
-						vertex[1],
-						vertex[2]);
-				}
-				vtkVertices[v]=addedVertices.at(vertex);
+				addedVertices[vertex]=mesh->GetPoints()->InsertNextPoint(
+					vertex[0],
+					vertex[1],
+					vertex[2]);
 			}
-			mesh->GetPolys()->InsertNextCell(4,vtkVertices);
-		};
-		const std::array<int,4> faceCornerIndices[3][2]=
+			vtkVertices[v]=addedVertices.at(vertex);
+		}
+		mesh->GetPolys()->InsertNextCell(4,vtkVertices);
+	};
+	const std::array<int,4> faceCornerIndices[3][2]=
+	{
 		{
-			{
-				{0,4,6,2},
-				{1,3,7,5}
-			},
-			{
-				{0,1,5,4},
-				{3,2,6,7},
-			},
-			{
-				{1,0,2,3},
-				{4,5,7,6}
-			}
-		};
-		for(const auto &voxel:filledVoxels)
+			{0,4,6,2},
+			{1,3,7,5}
+		},
 		{
-			for(int axis=0;axis<3;++axis)
+			{0,1,5,4},
+			{3,2,6,7},
+		},
+		{
+			{1,0,2,3},
+			{4,5,7,6}
+		}
+	};
+	for(const auto &voxel:voxels)
+	{
+		for(int axis=0;axis<3;++axis)
+		{
+			for(int direction:{-1,1})
 			{
-				for(int direction:{-1,1})
+				auto neighbour=voxel;
+				neighbour[axis]+=direction;
+				if(voxels.count(neighbour)!=0)
+					continue;//no wall
+				const auto &cornerIndices=faceCornerIndices[axis][(direction+1)/2];
+				std::array<TVertex,4> vertices;
+				for(int v=0;v<4;++v)
 				{
-					auto neighbour=voxel;
-					neighbour[axis]+=direction;
-					if(filledVoxels.count(neighbour)!=0)
-						continue;//no wall
-					const auto &cornerIndices=faceCornerIndices[axis][(direction+1)/2];
-					std::array<TVertex,4> vertices;
-					for(int v=0;v<4;++v)
-					{
-						auto vertex=voxel;
-						for(int axis=0;axis<3;++axis)
-							vertex[axis]+=(cornerIndices[v]>>axis)&1;
-						vertices[v]=vertex;
-					}
-					addFace(vertices);
+					auto vertex=voxel;
+					for(int axis=0;axis<3;++axis)
+						vertex[axis]+=(cornerIndices[v]>>axis)&1;
+					vertices[v]=vertex;
 				}
+				addFace(vertices);
 			}
 		}
 	}
 	return mesh;
+}
+vtkSmartPointer<vtkImageData> SmoothImage(
+	vtkSmartPointer<vtkImageData> image,
+	int count)
+{
+	while(count-->0)
+	{
+		vtkNew<vtkImageData> smoothed;
+		int extent[6];
+		image->GetExtent(extent);
+		smoothed->SetExtent(extent);
+		smoothed->AllocateScalars(VTK_DOUBLE,1);
+		const TFasterImageAccessor imageReader(image);
+		for(int z=extent[4];z<=extent[5];++z)
+		{
+			for(int y=extent[2];y<=extent[3];++y)
+			{
+				for(int x=extent[0];x<=extent[1];++x)
+				{
+					double sum=0;
+					int count=0;
+					for(int dz=-1;dz<=1;++dz)
+					{
+						if(z+dz<extent[4] || z+dz>extent[5])
+							continue;
+						for(int dy=-1;dy<=1;++dy)
+						{
+							if(y+dy<extent[2] || y+dy>extent[3])
+								continue;
+							for(int dx=-1;dx<=1;++dx)
+							{
+								if(x+dx<extent[0] || x+dx>extent[1])
+									continue;
+								sum+=imageReader.Get(x+dx,y+dy,z+dz);
+								++count;
+							}
+						}
+					}
+					smoothed->SetScalarComponentFromDouble(x,y,z,0,sum/count);
+				}
+			}
+		}
+		image=smoothed;
+	}
+	return image;
+}
+vtkSmartPointer<vtkPolyData> MakeCloudView(
+	const std::set<TVoxel> &voxels,
+	double radius)
+{
+	const auto maxCoordinate=[&]()
+	{
+		int result=0;
+		for(const auto &voxel:voxels)
+			for(int coordinate:voxel)
+				result=std::max(result,std::abs(coordinate));
+		return result;
+	}();
+	const auto locator=[&]()
+	{
+		vtkNew<vtkPoints> points;
+		for(const auto &voxel:voxels)
+		{
+			double coordinates[3];
+			for(int c=0;c<3;++c)
+				coordinates[c]=double(voxel[c]);
+			points->InsertNextPoint(coordinates);
+		}
+		vtkNew<vtkPolyData> polyData;
+		polyData->SetPoints(points);
+		vtkNew<vtkPointLocator> result;
+		result->SetDataSet(polyData);
+		result->BuildLocator();
+		return result;
+	}();
+	const auto image=[&]()
+	{
+		const int dimension=maxCoordinate+int(radius+1);
+		vtkNew<vtkImageData> image;
+		image->SetExtent(-dimension,dimension,-dimension,dimension,-dimension,dimension);
+		image->AllocateScalars(VTK_DOUBLE,1);
+		for(int z=-dimension;z<=dimension;++z)
+		{
+			for(int y=-dimension;y<=dimension;++y)
+			{
+				for(int x=-dimension;x<=dimension;++x)
+				{
+					const double point[]={double(x),double(y),double(z)};
+					double squaredDistance=std::numeric_limits<double>::max();
+					const double limit=radius+1;
+					const auto closestPointId=
+						locator->FindClosestPointWithinRadius(limit,point,squaredDistance);
+					if(closestPointId==-1)
+						squaredDistance=limit*limit;
+					image->SetScalarComponentFromDouble(x,y,z,0,std::sqrt(squaredDistance));
+				}
+			}
+		}
+		return SmoothImage(image,3);
+	}();
+	const auto isosurface=[&]()
+	{
+		vtkNew<vtkMarchingCubes> builder;
+		builder->SetInputData(image);
+		builder->SetNumberOfContours(1);
+		builder->SetValue(0,radius);
+		builder->SetComputeGradients(false);
+		builder->SetComputeNormals(false);
+		builder->SetComputeScalars(false);
+		builder->Update();
+		return vtkSmartPointer<vtkPolyData>(builder->GetOutput());
+	}();
+	return isosurface;
+}
+vtkSmartPointer<vtkPolyData> MakePercolationModel(
+	const std::uint32_t seed,
+	bool makeCloud)
+{
+	const auto filledVoxels=FillPercolationVoxels(seed);
+	if(makeCloud)
+		return MakeCloudView(filledVoxels,10);
+	else
+		return MakeVoxelizedView(filledVoxels);
 }
 ///////////////////////////////////////////////////////////////////////////////
 class TMainWindow:public QMainWindow
@@ -134,6 +305,7 @@ public:
 private:
 	QMainWindow Window;
 	QLineEdit *SeedEditor;
+	QCheckBox *CloudMode;
 	vtkNew<vtkRenderer> Renderer;
 	vtkSmartPointer<vtkActor> Actor;
 	void UpdateModel();
@@ -173,7 +345,7 @@ TMainWindow::TMainWindow()
 			seedLayout->addWidget(SeedEditor,1);
 			layout->addLayout(seedLayout);
 		}
-		{//add buttons
+		{//add seed switching buttons
 			auto *buttonsLayout=new QHBoxLayout();
 			auto *previousSeedButton=new QPushButton("previous",panelWidget);
 			connect(previousSeedButton,&QPushButton::clicked,[this](){ChangeSeed(-1);});
@@ -182,6 +354,11 @@ TMainWindow::TMainWindow()
 			connect(nextSeedButton,&QPushButton::clicked,[this](){ChangeSeed(1);});
 			buttonsLayout->addWidget(nextSeedButton);
 			layout->addLayout(buttonsLayout);
+		}
+		{//add cloud button
+			CloudMode=new QCheckBox("cloud mode",panelWidget);
+			connect(CloudMode,&QCheckBox::stateChanged,[this](){UpdateModel();});
+			layout->addWidget(CloudMode);
 		}
 		layout->addStretch(1);
 		panelWidget->setLayout(layout);
@@ -196,7 +373,9 @@ void TMainWindow::UpdateModel()
 		Renderer->RemoveActor(Actor);
 	Actor=vtkNew<vtkActor>();
 	vtkNew<vtkPolyDataMapper> mapper;
-	mapper->SetInputData(MakePercolationModel(GetCurrentSeed()));
+	mapper->SetInputData(MakePercolationModel(
+		GetCurrentSeed(),
+		CloudMode->isChecked()));
 	Actor->SetMapper(mapper);
 	Renderer->AddActor(Actor);
 	Renderer->GetRenderWindow()->Render();
